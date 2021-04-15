@@ -1,13 +1,22 @@
-from math import sqrt
 
-print(bin(2))
-
-s1 = '0b1' + '0'*1024
-i1 = int(s1,base=2)
+from math import gcd
 
 
-s2 = '0b1' + '0'*1024
-i2 = int(s2,base=2)
+def gcdext(a, b):
+    if b == 0:
+        return (a, 1, 0)
+
+    d, x, y = gcdext(b, a % b)
+    x, y = y, x-(a//b)*y
+    return (d, x, y)
 
 
-print(len(str(i1)))
+m=20
+d=13
+
+(_,_,e)=gcdext(20, 13)
+if e < 0:
+    e+=m
+print(f"e={e}")
+
+print(pow())

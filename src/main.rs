@@ -1,131 +1,100 @@
-use num_bigint;
-use num_bigint::BigUint;
-use num_traits;
-use num_traits::{One, Zero};
-use rand::random;
+use std::fs::{read, write};
 
-use std::{mem::replace, usize};
+use num_bigint::{self, BigUint, ToBigUint};
+use num_traits::{self, one, Num, ToPrimitive};
+mod primes;
 
-// fn gen_primes(){
-//     use std::collections::HashSet;
-
-//     //сделать генерацию по блокам
-//     let N = 100;
-//     let primes:HashSet<u32> = [2u32,3u32].iter().cloned().collect();
-//     let mut v = vec![0;100];
-
-//     for i in 0..N{
-//         v[i]=i+1;
-//     }
-
-//     println!("{:?}",v);
-// }
-
-fn gen_primes(n: usize) -> Vec<usize> {
-    // use std::collections::HashSet;
-
-    //сделать генерацию по блокам
-    // let primes:HashSet<u32> = [2u32,3u32].iter().cloned().collect();
-    let mut primes = Vec::new();
-    let mut v = vec![0; n - 1];
-
-    for i in 0..n - 1 {
-        v[i] = i + 2;
+fn encode(public_key_d_n: (BigUint, BigUint), msg: &[u8]) -> Vec<BigUint> {
+    let (d, n) = public_key_d_n;
+    let mut encoded_msg = vec![];
+    for byte in msg {
+        let rem = primes::powmod(byte.to_biguint().unwrap().clone(), d.clone(), n.clone());
+        encoded_msg.push(rem);
     }
-
-    for i in 0..n - 1 {
-        if v[i] != 0 {
-            let mut j: usize = i + v[i];
-            while j < n - 1 {
-                v[j] = 0;
-                j += v[i];
-            }
-            primes.push(v[i]);
-        }
-    }
-
-    // println!("{:?}",v);
-    return primes;
+    encoded_msg
 }
 
-fn gcd(a: usize, b: usize) -> usize {
-    let r = a % b;
-    if r != 0 {
-        return gcd(b, r);
+fn decode(private_key_e_n: (BigUint, BigUint), encoded_msg: &[BigUint]) -> Vec<BigUint> {
+    let (e, n) = private_key_e_n;
+    let mut msg = vec![];
+    for byte in encoded_msg {
+        let rem = primes::powmod(byte.clone(), e.clone(), n.clone());
+        msg.push(rem);
     }
-    return b;
+    msg
 }
 
-fn get_keys() -> ((usize, usize), (usize, usize)) {
-    let primes = gen_primes(100_000);
-    println!("1");
-    let (p, q) = {
-        let size = primes.len();
-        let i1 = random::<usize>() % size;
-        let mut i2 = random::<usize>() % size;
-        while i2 == i1 {
-            i2 = random::<usize>() % size;
-        }
-        (primes[i1], primes[i2])
-    };
-
-    let n = p * q;
-    let f = (p - 1) * (q - 1);
-    println!("2");
-    let d = {
-        let mut val = random::<usize>() % f;
-        while gcd(f, val) != 1 {
-            val = random::<usize>() % f;
-        }
-        val
-    };
-    println!("3");
-    let e = {
-        let mut val = random::<usize>() % 10_000;
-        while (val * d) % f != 1 {
-            println!("{}",(val * d) % f);
-            val += 1;
-        }
-        val
-    };
-
-    println!("4");
-    ((d, n), (e, n))
+fn get_keys() -> ((BigUint, BigUint), (BigUint, BigUint)) {
+    let p_q = primes::get_primes(2);
+    let one = &one::<BigUint>();
+    let (p, q) = (&p_q[0], &p_q[1]);
+    let n = &(p * q);
+    let f = &((p - one) * (q - one));
+    let d = primes::get_lower_and_coprime_with(f.clone());
+    let e = primes::mul_inv_mod(d.clone(), f.clone());
+    ((d, n.clone()), (e, n.clone()))
 }
 
-fn encode(public_key: (usize, usize), msg_in_bytes: &[u8]) -> Vec<BigUint> {
-    let (d, n) = public_key;
-    // let d = BigUint::from(d);
-    // let n = BigUint::from(n);
+use clap::{App, Arg};
+fn main() -> std::io::Result<()> {
+    // println!("n={}, f={}, d={}, e={}", n, f, d, e);
 
-    let size = msg_in_bytes.len();
-    let mut pos = 0;
+    let matches = App::new("Encrypt programm")
+        .arg(
+            Arg::with_name("INPUT")
+                .help("Sets the input file to use")
+                .required(true)
+                .index(1),
+        )
+        .arg(Arg::with_name("file").required(true).takes_value(true))
+        .get_matches();
 
-    let mut encoded_message = Vec::new();
+    let cmd = matches.value_of("INPUT").unwrap();
+    let file_name = matches.value_of("file").unwrap();
+    println!("{}", cmd);
+    println!("{}", file_name);
+    if cmd == "e" {
+        let file = read(file_name)?;
 
-    while pos != size {
-        let t = random::<usize>() % n;
-        let val = BigUint::from_radix_be(&msg_in_bytes[pos..], 256).unwrap();
-        encoded_message.push(val.pow(d as u32) % n);
-        pos += t;
-        println!("{}",pos);
+        let (public_key, private_key) = get_keys();
+        let encoded = encode(public_key, &file);
+        let mut encoded_msg = vec![];
+        for val in encoded {
+            let s = val.to_string();
+            encoded_msg.extend(s.into_bytes());
+            encoded_msg.extend(b" ");
+        }
+
+        let mut prk = vec![];
+        prk.extend(private_key.0.to_string().into_bytes());
+        prk.extend(b" ");
+        prk.extend(private_key.1.to_string().into_bytes());
+
+        write("encoded_".to_string() + file_name, encoded_msg)?;
+        write("private_key_".to_string() + file_name, prk)?;
+    } else if cmd == "d" {
+        let file = read("encoded_".to_string() + file_name)?;
+        let key_file = read("private_key_".to_string() + file_name)?;
+        let t = [b'a', b'b'];
+
+        let en: Vec<BigUint> = key_file
+            .split(|&x| x == b' ')
+            .map(|x| BigUint::from_str_radix(&String::from_utf8_lossy(x), 10).unwrap())
+            .collect();
+        let private_key = (en[0].clone(), en[1].clone());
+        let symbols: Vec<BigUint> = file
+            .split(|&x| x == b' ')
+            .filter(|x| String::from_utf8_lossy(x).trim() != "")
+            .map(|x| BigUint::from_str_radix(String::from_utf8_lossy(x).trim(), 10).unwrap())
+            .collect();
+
+        let decoded_msg: Vec<u8> = decode(private_key, &symbols)
+            .iter()
+            .map(|x| x.to_u8().unwrap())
+            .collect();
+        write("decoded_".to_string() + file_name, decoded_msg)?;
+    } else {
+        panic!("Command unrecognized; command is '{}'", cmd);
     }
-    encoded_message
-}
-
-fn decode() {}
-
-fn main() {
-    // let var = 100_000;
-    // println!("fib({})={}",var, fib(var));
-
-    // let n = BigUint::from(2u32);
-    // let p = BigUint::from(2048u32);
-    // let primes = gen_primes(100);
-    let msg = &[32,64,128];
-    let (public_key,private_key) = get_keys();
-    println!("{:?}", encode(public_key, msg));
-    // println!("{:?}",gcd(6,61));
-
-    // println!("{}",n.pow(1024).to_string().len());
+    Ok(())
 }
