@@ -25,7 +25,7 @@ fn decode(private_key_e_n: (BigUint, BigUint), encoded_msg: &[BigUint]) -> Vec<B
 }
 
 fn get_keys() -> ((BigUint, BigUint), (BigUint, BigUint)) {
-    let p_q = primes::get_primes(2);
+    let p_q = primes::get_primes(2, 2048);
     let one = &one::<BigUint>();
     let (p, q) = (&p_q[0], &p_q[1]);
     let n = &(p * q);
@@ -35,29 +35,39 @@ fn get_keys() -> ((BigUint, BigUint), (BigUint, BigUint)) {
     ((d, n.clone()), (e, n.clone()))
 }
 
-use clap::{App, Arg};
 fn main() -> std::io::Result<()> {
-    // println!("n={}, f={}, d={}, e={}", n, f, d, e);
-
+    use clap::{App, Arg};
     let matches = App::new("Encrypt programm")
         .arg(
-            Arg::with_name("INPUT")
-                .help("Sets the input file to use")
+            Arg::with_name("COMMAND")
+                .help("Sets the command")
                 .required(true)
                 .index(1),
         )
-        .arg(Arg::with_name("file").required(true).takes_value(true))
+        .arg(
+            Arg::with_name("FILENAME")
+                .help("Sets the input file to use")
+                .required(true)
+                .takes_value(true),
+        )
         .get_matches();
 
-    let cmd = matches.value_of("INPUT").unwrap();
-    let file_name = matches.value_of("file").unwrap();
+    let cmd = matches.value_of("COMMAND").unwrap();
+    let file_name = matches.value_of("FILENAME").unwrap();
     println!("{}", cmd);
     println!("{}", file_name);
-    if cmd == "e" {
+    if ["e", "encode"].contains(&cmd) {
         let file = read(file_name)?;
 
+        let t1 = std::time::Instant::now();
+
         let (public_key, private_key) = get_keys();
+
+        let t2 = std::time::Instant::now();
+        println!("Delay={:?}", t2 - t1);
+
         let encoded = encode(public_key, &file);
+
         let mut encoded_msg = vec![];
         for val in encoded {
             let s = val.to_string();
@@ -72,10 +82,9 @@ fn main() -> std::io::Result<()> {
 
         write("encoded_".to_string() + file_name, encoded_msg)?;
         write("private_key_".to_string() + file_name, prk)?;
-    } else if cmd == "d" {
+    } else if ["d", "decode"].contains(&cmd) {
         let file = read("encoded_".to_string() + file_name)?;
         let key_file = read("private_key_".to_string() + file_name)?;
-        let t = [b'a', b'b'];
 
         let en: Vec<BigUint> = key_file
             .split(|&x| x == b' ')
