@@ -4,7 +4,7 @@ use num_traits::{one, zero};
 fn new_gcd(a: &BigUint, b: &BigUint) -> BigUint {
     use std::mem::replace;
     let mut r = a % b;
-    #[allow(unused)]
+    #[allow(unused_assignments)]
     let mut a = a.clone();
     let mut b = b.clone();
     while r != zero() {
@@ -89,17 +89,16 @@ pub fn get_lower_and_coprime_with(n: BigUint) -> BigUint {
     return t;
 }
 
-pub fn get_primes(n: usize, bit_size: u64) -> Vec<BigUint> {
+pub fn get_primes(n: usize, threads_amount: usize, bit_size: u64) -> Vec<BigUint> {
     use mpsc::TryRecvError::{Disconnected, Empty};
     use std::{collections::HashSet, sync::mpsc, thread};
-    //TODO: custom thread amount
-    let thread_amount = 8;
-    let (tx, rx) = mpsc::channel();
-    let mut handles = Vec::with_capacity(thread_amount);
 
-    for _ in 0..thread_amount {
-        let to_master = tx.clone();
-        let (from_master, to_slave) = mpsc::channel();
+    let (primes_sender, primes_receiver) = mpsc::channel();
+    let mut handles = Vec::with_capacity(threads_amount);
+
+    for _ in 0..threads_amount {
+        let primes_sender = primes_sender.clone();
+        let (say_stop, should_stop) = mpsc::channel();
 
         let handle = thread::spawn(move || {
             let mut rng = rand::thread_rng();
@@ -112,7 +111,7 @@ pub fn get_primes(n: usize, bit_size: u64) -> Vec<BigUint> {
             }
 
             loop {
-                match to_slave.try_recv() {
+                match should_stop.try_recv() {
                     Ok(()) => return,
                     Err(e) => match e {
                         Disconnected => panic!("Parent thread closed before child thread"),
@@ -121,17 +120,20 @@ pub fn get_primes(n: usize, bit_size: u64) -> Vec<BigUint> {
                 };
 
                 if fast_prime_test(num.clone()) {
-                    to_master.send(num.clone()).unwrap();
+                    if primes_sender.send(num.clone()).is_err() {
+                        return;
+                    }
                 }
+
                 num += &step;
             }
         });
 
-        handles.push((handle, from_master));
+        handles.push((handle, say_stop));
     }
 
     let mut primes = HashSet::new();
-    for received in rx {
+    for received in primes_receiver {
         if hard_prime_test(received.clone()) {
             primes.insert(received);
             if primes.len() == n {
@@ -139,8 +141,10 @@ pub fn get_primes(n: usize, bit_size: u64) -> Vec<BigUint> {
             }
         }
     }
-    for (_, sender) in handles.iter() {
-        sender.send(()).unwrap();
+    for (_, say_stop) in handles.iter() {
+        if say_stop.send(()).is_err() {
+            continue;
+        }
     }
     for (handler, _) in handles {
         handler.join().unwrap();
@@ -203,7 +207,6 @@ pub fn hard_prime_test(n: Number) -> bool {
     let mut rng = rand::thread_rng();
     for _ in 0..128 {
         let a: Number = rng.gen_range(one()..n.clone());
-        //FIXME: remove while
         if gcd(&a, &n) != one() {
             return false;
         }
